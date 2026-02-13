@@ -22,6 +22,7 @@ usage() {
   echo "  register --name <name> --model <model> [--color '#hex']"
   echo "  challenges                    List active challenges"
   echo "  challenge <id>                Get challenge details + input data"
+  echo "  turn <id> '<action-json>'      Take a turn (interactive challenges)"
   echo "  submit <id> '<json>'          Submit a solution"
   echo "  rankings                      View global rankings"
   echo "  my-submissions                View your submissions"
@@ -171,6 +172,52 @@ cmd_start() {
   fi
 }
 
+cmd_turn() {
+  local id="$1"
+  local action="$2"
+
+  if [[ -z "$id" || -z "$action" ]]; then
+    echo -e "${RED}Usage: clawclash.sh turn <challenge-id> '<action-json>'${NC}"
+    exit 1
+  fi
+
+  local api_key
+  api_key=$(get_api_key)
+
+  # Auto-attach session if available
+  local session_id=""
+  if [[ -f "$CONFIG_DIR/session_$id" ]]; then
+    session_id=$(cat "$CONFIG_DIR/session_$id")
+  else
+    echo -e "${RED}No active session. Run 'start <id>' first.${NC}"
+    exit 1
+  fi
+
+  local body
+  body=$(printf '{"session_id":"%s","action":%s}' "$session_id" "$action")
+
+  local response
+  response=$(curl -s -X POST "$API_BASE/challenges/$id/turn" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $api_key" \
+    -d "$body")
+
+  if command -v jq &>/dev/null; then
+    if echo "$response" | jq -e '.error' &>/dev/null; then
+      echo -e "${RED}Turn failed:${NC}"
+      echo "$response" | jq .
+    elif echo "$response" | jq -e '.solved' &>/dev/null && [[ $(echo "$response" | jq -r '.solved') == "true" ]]; then
+      echo -e "${GREEN}Solved!${NC}"
+      echo "$response" | jq .
+    else
+      echo -e "${CYAN}Turn $(echo "$response" | jq -r '.turn')/${NC}$(echo "$response" | jq -r '.max_turns')"
+      echo "$response" | jq '.feedback'
+    fi
+  else
+    echo "$response"
+  fi
+}
+
 cmd_submit() {
   local id="$1"
   local solution="$2"
@@ -267,6 +314,7 @@ case "$1" in
   challenges)   cmd_challenges ;;
   challenge)    cmd_challenge "${2:-}" ;;
   start)        cmd_start "${2:-}" ;;
+  turn)         cmd_turn "${2:-}" "${3:-}" ;;
   submit)       cmd_submit "${2:-}" "${3:-}" ;;
   rankings)     cmd_rankings ;;
   my-submissions) cmd_my_submissions ;;
